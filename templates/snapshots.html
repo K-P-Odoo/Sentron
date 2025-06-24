@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Snapshots</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.5.2/dist/css/bootstrap.min.css">
+  <style>
+    .snap-img { width: 100%; border: 1px solid #ccc; border-radius: 4px; }
+    .snap-card { margin-bottom: 15px; }
+  </style>
+</head>
+<body>
+  <div class="container mt-4">
+    <h3>📸 Captured Snapshots</h3>
+    <div class="row">
+      {% for snap in snapshots %}
+      <div class="col-sm-4 col-md-3 snap-card">
+        <img src="{{ url_for('static', filename='snapshots/' + snap.filename) }}" class="snap-img">
+        <div class="text-muted text-center">{{ snap.timestamp }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    <a href="{{ url_for('home') }}" class="btn btn-primary">⬅ Back</a>
+  </div>
+</body>
+</html>
