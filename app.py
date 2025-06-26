@@ -81,20 +81,31 @@ def snapshots():
     if os.path.isdir(path):
         for filename in os.listdir(path):
             if filename.endswith(".jpg"):
-                # Example filename: "threat_gun_20250625_1500.jpg"
-                parts = filename.replace('.jpg', '').split('_')
-                threat = parts[1] if len(parts) > 2 else "Unknown"
-                date = parts[2] if len(parts) > 2 else "Unknown"
-                time = parts[3] if len(parts) > 3 else "Unknown"
+                try:
+                    # Expecting filename like: threat_gun_20250625_150012.jpg
+                    parts = filename.replace('.jpg', '').split('_')
+                    threat = parts[1] if len(parts) > 2 else "Unknown"
 
-                snaps.append({
-                    'filename': filename,
-                    'threat': threat.capitalize(),
-                    'date': date,
-                    'time': time
-                })
+                    # Parse date and time
+                    date_str = parts[2]  # '20250625'
+                    time_str = parts[3]  # '150012'
+
+                    # Format date and time
+                    formatted_date = f"{date_str[6:8]}/{date_str[4:6]}/{date_str[0:4]}"  # DD/MM/YYYY
+                    formatted_time = f"{time_str[0:2]}:{time_str[2:4]}:{time_str[4:6]}"    # HH:MM:SS
+
+                    snaps.append({
+                        'filename': filename,
+                        'threat': threat.capitalize(),
+                        'date': formatted_date,
+                        'time': formatted_time
+                    })
+                except Exception as e:
+                    print(f"Error parsing filename '{filename}': {e}")
+                    continue  # Skip invalid files
 
     return render_template('snapshots.html', snapshots=snaps)
+
 
 @app.route('/capture_snapshot/<threat>')
 def capture_snapshot(threat):
@@ -109,7 +120,8 @@ def capture_snapshot(threat):
     success, frame = camera.read()
     if success:
         now = datetime.now()
-        filename = f"threat_{threat}_{now.strftime('%Y%m%d_%H%M%S')}.jpg"
+        timestamp = now.strftime('%Y%m%d_%H%M%S')  # safe format
+        filename = f"threat_{threat}_{timestamp}.jpg"
         filepath = os.path.join(path, filename)
         cv2.imwrite(filepath, frame)
         return f"Snapshot saved: {filename}", 200
@@ -121,5 +133,6 @@ def test():
     return render_template('index.html')
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=True, host="0.0.0.0", port=5000)
+
 

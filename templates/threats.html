@@ -18,11 +18,13 @@
       </thead>
       <tbody>
         {% for threat in threats %}
-        <tr><td>{{ threat.time }}</td><td>{{ threat.type }}</td></tr>
+        <tr>
+          <td>{{ threat.time }}</td>
+          <td>{{ threat.type }}</td>
+        </tr>
         {% endfor %}
       </tbody>
     </table>
-    <a href="{{ url_for('home') }}" class="btn btn-primary">⬅ Back</a>
   </div>
 </body>
 </html>
