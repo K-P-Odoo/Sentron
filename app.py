@@ -64,22 +64,57 @@ def threats():
     if 'user' not in session:
         return redirect(url_for('login'))
     threats = []
-    with open('logs/threats.csv', newline='') as csvfile:
-        reader = csv.DictReader(csvfile)
-        for row in reader:
-            threats.append(row)
+    if os.path.exists('logs/threats.csv'):
+        with open('logs/threats.csv') as f:
+            reader = csv.DictReader(f)
+            threats = list(reader)
     return render_template('threats.html', threats=threats)
 
 @app.route('/snapshots')
 def snapshots():
     if 'user' not in session:
         return redirect(url_for('login'))
+
     snaps = []
     path = 'static/snapshots'
-    for filename in os.listdir(path):
-        timestamp = filename.replace('.jpg', '').split('_')[-1]
-        snaps.append({'filename': filename, 'timestamp': timestamp})
+
+    if os.path.isdir(path):
+        for filename in os.listdir(path):
+            if filename.endswith(".jpg"):
+                # Example filename: "threat_gun_20250625_1500.jpg"
+                parts = filename.replace('.jpg', '').split('_')
+                threat = parts[1] if len(parts) > 2 else "Unknown"
+                date = parts[2] if len(parts) > 2 else "Unknown"
+                time = parts[3] if len(parts) > 3 else "Unknown"
+
+                snaps.append({
+                    'filename': filename,
+                    'threat': threat.capitalize(),
+                    'date': date,
+                    'time': time
+                })
+
     return render_template('snapshots.html', snapshots=snaps)
+
+@app.route('/capture_snapshot/<threat>')
+def capture_snapshot(threat):
+    if 'user' not in session:
+        return redirect(url_for('login'))
+
+    # Create snapshots folder if it doesn't exist
+    path = 'static/snapshots'
+    os.makedirs(path, exist_ok=True)
+
+    # Capture a frame
+    success, frame = camera.read()
+    if success:
+        now = datetime.now()
+        filename = f"threat_{threat}_{now.strftime('%Y%m%d_%H%M%S')}.jpg"
+        filepath = os.path.join(path, filename)
+        cv2.imwrite(filepath, frame)
+        return f"Snapshot saved: {filename}", 200
+    else:
+        return "Failed to capture frame", 500
 
 @app.route('/test')
 def test():
