@@ -20,7 +20,10 @@ def recognize_debug(model_path="trained_knn_model.clf", distance_threshold=0.5):
             print("[ERROR] Failed to read frame.")
             break
 
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        # Convert BGR to RGB and ensure C-contiguous
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB).copy()
+        print(f"[DEBUG] Frame dtype: {rgb_frame.dtype}, shape: {rgb_frame.shape}")
+
         face_locations = face_recognition.face_locations(rgb_frame)
 
         if face_locations:
@@ -33,7 +36,7 @@ def recognize_debug(model_path="trained_knn_model.clf", distance_threshold=0.5):
                 name = predictions[i] if is_recognized[i] else "Unknown"
                 confidence = 1 - closest_distances[0][i][0]
 
-                # Draw rectangle and name
+                # Draw rectangle and label
                 color = (0, 255, 0) if is_recognized[i] else (0, 0, 255)
                 label = f"{name} ({confidence:.2f})"
 
