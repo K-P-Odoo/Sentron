@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Recent Recognitions</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script>
+        // Live search and filter logic
+        function filterTable() {
+            const search = document.getElementById("searchInput").value.toLowerCase();
+            const filter = document.getElementById("faceFilter").value;
+            const rows = document.querySelectorAll("tbody tr");
+
+            rows.forEach(row => {
+                const name = row.cells[0].textContent.toLowerCase();
+                const matchesSearch = name.includes(search) || row.textContent.toLowerCase().includes(search);
+                const isUnknown = name === "unknown";
+                const show = (
+                    (filter === "all") ||
+                    (filter === "known" && !isUnknown) ||
+                    (filter === "unknown" && isUnknown)
+                );
+
+                row.style.display = (matchesSearch && show) ? "" : "none";
+            });
+        }
+    </script>
+</head>
+<body>
+
+    <!-- Page Heading -->
+    <div class="mt-4">
+        <div class="heading">Recent Recognitions</div>
+    </div>
+
+    <!-- Navigation -->
+    <div class="nav-buttons">
+        <a href="{{ url_for('home') }}">
+            <button class="nav-back-btn">← Home</button>
+        </a>
+    </div>
+
+    <!-- Search, Filter, Download -->
+    <div class="d-flex mt-3">
+        <input type="text" id="searchInput" class="form-control" onkeyup="filterTable()" placeholder="Search by name or time..." style="width: 300px; border-radius: 5px; padding: 8px;">
+        
+        <select id="faceFilter" class="form-control" onchange="filterTable()" style="width: 180px; border-radius: 5px; padding: 8px;">
+            <option value="all">All Faces</option>
+            <option value="known">Known Only</option>
+            <option value="unknown">Unknown Only</option>
+        </select>
+        
+        <a href="{{ url_for('download_csv') }}" download>
+            <button class="btn">Download CSV</button>
+        </a>
+    </div>
+
+    <!-- Recognition Table -->
+    <div class="container mt-3">
+        {% if recognitions %}
+        <table class="table table-dark table-hover">
+            <thead>
+                <tr>
+                    <th scope="col">Name</th>
+                    <th scope="col">Confidence</th>
+                    <th scope="col">Timestamp</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for rec in recognitions %}
+                <tr>
+                    <td>{{ rec.name }}</td>
+                    <td>{{ rec.confidence }}</td>
+                    <td>{{ rec.time }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+            <h3 class="text-center mt-4">No recent recognitions found.</h3>
+        {% endif %}
+    </div>
+
+</body>
+</html>

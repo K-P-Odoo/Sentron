@@ -9,6 +9,7 @@
         <h1 class="heading">📹 Live Feed - Sentron</h1>
         <img src="{{ url_for('video_feed') }}" class="video-feed mt-3 mb-3">
         <button class="btn capture-btn">Capture Snapshot</button> <!-- Unique class -->
+
         <div class="d-flex justify-content-center mt-4 gap-3"> <!-- Added gap-3 for spacing -->
             <div class="button-box">
                 <a href="{{ url_for('threats') }}">
@@ -18,6 +19,11 @@
             <div class="button-box">
                 <a href="{{ url_for('snapshots') }}">
                     <button class="btn">📸 View Snapshots</button>
+                </a>
+            </div>
+            <div class="button-box">
+                <a href="{{ url_for('recent') }}">
+                    <button class="btn">🧠 Recent Recognitions</button>
                 </a>
             </div>
             <div class="button-box">
