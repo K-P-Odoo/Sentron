@@ -17,18 +17,24 @@ USER = {'admin': 'password123'}
 # ========== VIDEO FEED ==========
 camera = cv2.VideoCapture(0)
 
+from Recognition import recognize_faces
+
 def gen_frames():
     while True:
         success, frame = camera.read()
         if not success:
             break
-        else:
-            # Encode frame to JPEG
-            ret, buffer = cv2.imencode('.jpg', frame)
-            frame = buffer.tobytes()
-            # Stream frame
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+
+        # 🔍 Perform face recognition on each frame
+        frame = recognize_faces(frame)
+
+        # Encode the frame to JPEG format
+        ret, buffer = cv2.imencode('.jpg', frame)
+        frame = buffer.tobytes()
+
+        # Stream the frame
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
 # ========== AUTH ==========
 @app.route('/')
