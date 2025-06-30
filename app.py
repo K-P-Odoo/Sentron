@@ -1,11 +1,12 @@
 import os
 print("Current working directory:", os.getcwd())
 
-from flask import Flask, render_template, request, redirect, url_for, session, Response
+from flask import Flask, render_template, request, redirect, url_for, session, Response, send_file
 import cv2
 import os
 from datetime import datetime
 import csv
+from Recognition import recognize_faces, get_recent_recognitions
 
 app = Flask(__name__, template_folder='templates')
 app.secret_key = 'sentron-secret-key'  # Change this in production
@@ -131,6 +132,21 @@ def capture_snapshot(threat):
         return f"Snapshot saved: {filename}", 200
     else:
         return "Failed to capture frame", 500
+
+# ========== RECENT RECOGNITIONS ==========
+@app.route('/recent')
+def recent():
+    if 'user' not in session:
+        return redirect(url_for('login'))
+    recent_faces = get_recent_recognitions()
+    return render_template('recent.html', recognitions=recent_faces)
+
+# ========== DOWNLOAD FILE ==========
+@app.route('/download_csv')
+def download_csv():
+    if 'user' not in session:
+        return redirect(url_for('login'))
+    return send_file('logs/recognition_log.csv', as_attachment=True)
 
 @app.route('/test')
 def test():
