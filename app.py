@@ -17,7 +17,7 @@ USER = {'admin': 'password123'}
 # ========== VIDEO FEED ==========
 camera = cv2.VideoCapture(0)
 
-from Recognition import recognize_faces
+# Release camera when app exits
 
 def gen_frames():
     while True:
@@ -25,7 +25,7 @@ def gen_frames():
         if not success:
             break
 
-        # 🔍 Perform face recognition on each frame
+        # Perform face recognition on each frame
         frame = recognize_faces(frame)
 
         # Encode the frame to JPEG format
@@ -82,41 +82,41 @@ def threats():
     return render_template('threats.html', threats=threats)
 
 @app.route('/snapshots')
+@app.route('/snapshots')
 def snapshots():
     if 'user' not in session:
         return redirect(url_for('login'))
 
     snaps = []
-    path = 'static/snapshots'
+    base_path = 'static/snapshots'
 
-    if os.path.isdir(path):
-        for filename in os.listdir(path):
-            if filename.endswith(".jpg"):
-                try:
-                    # Expecting filename like: threat_gun_20250625_150012.jpg
-                    parts = filename.replace('.jpg', '').split('_')
-                    threat = parts[1] if len(parts) > 2 else "Unknown"
+    if os.path.isdir(base_path):
+        for folder in os.listdir(base_path):
+            folder_path = os.path.join(base_path, folder)
+            if os.path.isdir(folder_path):
+                for filename in os.listdir(folder_path):
+                    if filename.endswith(".jpg"):
+                        try:
+                            # Expecting: threat_Unknown_HHMMSS.jpg
+                            parts = filename.replace('.jpg', '').split('_')
+                            threat = parts[1] if len(parts) > 2 else "Unknown"
+                            time_str = parts[2] if len(parts) > 2 else "000000"
 
-                    # Parse date and time
-                    date_str = parts[2]  # '20250625'
-                    time_str = parts[3]  # '150012'
+                            # Format date (from folder) and time
+                            formatted_date = "/".join(reversed(folder.split("-")))  # DD/MM/YYYY
+                            formatted_time = f"{time_str[0:2]}:{time_str[2:4]}:{time_str[4:6]}"
 
-                    # Format date and time
-                    formatted_date = f"{date_str[6:8]}/{date_str[4:6]}/{date_str[0:4]}"  # DD/MM/YYYY
-                    formatted_time = f"{time_str[0:2]}:{time_str[2:4]}:{time_str[4:6]}"    # HH:MM:SS
-
-                    snaps.append({
-                        'filename': filename,
-                        'threat': threat.capitalize(),
-                        'date': formatted_date,
-                        'time': formatted_time
-                    })
-                except Exception as e:
-                    print(f"Error parsing filename '{filename}': {e}")
-                    continue  # Skip invalid files
+                            snaps.append({
+                                'filepath': f"{folder}/{filename}",  # relative to static
+                                'threat': threat.capitalize(),
+                                'date': formatted_date,
+                                'time': formatted_time
+                            })
+                        except Exception as e:
+                            print(f"Error parsing filename '{filename}': {e}")
+                            continue  # Skip invalid files
 
     return render_template('snapshots.html', snapshots=snaps)
-
 
 @app.route('/capture_snapshot/<threat>')
 def capture_snapshot(threat):
