@@ -7,10 +7,12 @@
 <body>
     <div class="container mt-4 text-center">
         <h1 class="heading">📹 Live Feed - Sentron</h1>
-        <img src="{{ url_for('video_feed') }}" class="video-feed mt-3 mb-3">
-        <button class="btn capture-btn">Capture Snapshot</button> <!-- Unique class -->
+        <img src="{{ url_for('video_feed') }}" class="video-feed mt-3 mb-3" alt="Live Video Feed">
 
-        <div class="d-flex justify-content-center mt-4 gap-3"> <!-- Added gap-3 for spacing -->
+        <!-- Manual snapshot capture button -->
+        <button class="btn capture-btn">Capture Snapshot</button>
+
+        <div class="d-flex justify-content-center mt-4 gap-3">
             <div class="button-box">
                 <a href="{{ url_for('threats') }}">
                     <button class="btn">⚠️ View Threat Log</button>
@@ -34,20 +36,45 @@
         </div>
     </div>
 
+    <!-- Toast container -->
+    <div id="toast-container"></div>
+
     <script>
+    document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('.capture-btn').forEach(button => {
-            button.addEventListener('click', function() {
+            button.addEventListener('click', function(event) {
+                event.preventDefault();
+
                 fetch('/capture_snapshot/unknown')
                     .then(response => {
                         if (response.ok) {
-                            alert('Snapshot captured!');
+                            showToast('📸 Snapshot captured!');
                         } else {
-                            alert('Failed to capture snapshot.');
+                            showToast('❌ Failed to capture snapshot.', 'error');
                         }
                     })
-                    .catch(() => alert('Error capturing snapshot.'));
+                    .catch(error => {
+                        console.error('Fetch error:', error);
+                        showToast('❌ Error capturing snapshot.', 'error');
+                    });
             });
         });
+    });
+
+    function showToast(message, type = 'success') {
+        const container = document.getElementById('toast-container');
+        if (!container) return;
+
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.innerText = message;
+        container.appendChild(toast);
+
+        setTimeout(() => {
+            toast.classList.add('fade-out');
+            toast.addEventListener('transitionend', () => toast.remove());
+        }, 3000);
+    }
     </script>
 </body>
 </html>
