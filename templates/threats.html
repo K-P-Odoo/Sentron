@@ -3,26 +3,49 @@
 <head>
   <title>Threat Log</title>
   <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    .thumb { max-width: 280px; max-height: 180px; border: 1px solid #ddd; border-radius: 8px; }
+    table { width:100%; border-collapse: collapse; }
+    th, td { padding: 10px; border-bottom: 1px solid #eee; vertical-align: top; }
+    thead th { text-align: left; }
+    .nav-buttons { margin: 12px; }
+  </style>
 </head>
-
 <body>
   <div class="nav-buttons">
     <button onclick="window.history.back()">← Back</button>
-</div>
+  </div>
 
   <div class="container mt-4">
     <h3>⚠️ Threat Log</h3>
     <table class="table table-striped mt-3">
       <thead class="thead-dark">
-        <tr><th>Time</th><th>Threat Type</th></tr>
+        <tr>
+          <th>Snapshot</th>
+          <th>Date &amp; Time</th>
+          <th>Threat Type</th>
+        </tr>
       </thead>
       <tbody>
-        {% for threat in threats %}
-        <tr>
-          <td>{{ threat.time }}</td>
-          <td>{{ threat.type }}</td>
-        </tr>
-        {% endfor %}
+        {% if threats and threats|length > 0 %}
+          {% for t in threats %}
+          <tr>
+            <td>
+              {% if t.image %}
+                <a href="{{ url_for('static', filename='snapshots/' ~ t.image.split('/')[-1]) }}" target="_blank">
+                  <img class="thumb" src="{{ url_for('static', filename='snapshots/' ~ t.image.split('/')[-1]) }}" alt="snapshot">
+                </a>
+              {% else %}
+                —
+              {% endif %}
+            </td>
+            <td>{{ t.time }}</td>
+            <td>{{ t.type }}</td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr><td colspan="3">No threats logged yet.</td></tr>
+        {% endif %}
       </tbody>
     </table>
   </div>

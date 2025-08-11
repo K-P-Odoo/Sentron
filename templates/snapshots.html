@@ -9,36 +9,26 @@
   <div class="nav-buttons">
     <button onclick="window.history.back()">← Back</button>
   </div>
-  
-  <h2 style="text-align:center;">Detected Snapshots</h2>
-  
-  <table>
-      <thead>
-          <tr>
-              <th>Snapshot</th>
-              <th>Threat</th>
-              <th>Date</th>
-              <th>Time</th>
-              <th>Download</th>
-          </tr>
-      </thead>
-      <tbody>
-          {% for snap in snapshots %}
-          <tr>
-              <td><img src="{{ url_for('static', filename='snapshots/' + snap.filepath) }}" alt="Snapshot"></td>
-              <td>{{ snap.threat }}</td>
-              <td>{{ snap.date }}</td>
-              <td>{{ snap.time }}</td>
-              <td>
-                <a href="{{ url_for('static', filename='snapshots/' + snap.filepath) }}" 
-                   download="{{ snap.threat }}_{{ snap.date | replace('/', '-') }}_{{ snap.time | replace(':', '') }}.jpg" 
-                   class="btn">
-                   Download
-                </a>
-              </td>
-          </tr>
-          {% endfor %}
-      </tbody>
-  </table>
+    <h2 style="text-align:center;">Detected Snapshots</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Snapshot</th>
+                <th>Threat</th>
+                <th>Date</th>
+                <th>Time</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for snap in snapshots %}
+            <tr>
+                <td><img src="{{ url_for('static', filename='snapshots/' + snap.filepath) }}" alt="Snapshot"></td>
+                <td>{{ snap.threat }}</td>
+                <td>{{ snap.date }}</td>
+                <td>{{ snap.time }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
 </body>
 </html>

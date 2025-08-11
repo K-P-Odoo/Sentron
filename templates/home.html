@@ -3,11 +3,27 @@
 <head>
     <title>Sentron Home</title>
     <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+      /* minimal visual hint for active toggle */
+      .toggle-wrap{display:flex;gap:12px;align-items:center;justify-content:center;margin-top:12px}
+      .pill{padding:6px 12px;border:1px solid #ccc;border-radius:999px;cursor:pointer;background:#fff}
+      .pill.active{background:#222;color:#fff;border-color:#222}
+    </style>
 </head>
 <body>
     <div class="container mt-4 text-center">
         <h1 class="heading">📹 Live Feed - Sentron</h1>
-        <img src="{{ url_for('video_feed') }}" class="video-feed mt-3 mb-3" alt="Live Video Feed">
+
+        <!-- MODE TOGGLE -->
+        <div class="toggle-wrap">
+          <span>Mode:</span>
+          <button class="pill" id="btn-face">Recognition</button>
+          <button class="pill" id="btn-violence">Violence</button>
+          <span id="mode-label" style="margin-left:8px;opacity:0.7;">Current: {{ mode|default('face') }}</span>
+        </div>
+
+        <!-- give the stream an id so we can refresh it after switching -->
+        <img id="stream" src="{{ url_for('video_feed') }}" class="video-feed mt-3 mb-3" alt="Live Video Feed">
 
         <!-- Manual snapshot capture button -->
         <button class="btn capture-btn">Capture Snapshot</button>
@@ -40,41 +56,59 @@
     <div id="toast-container"></div>
 
     <script>
-    document.addEventListener('DOMContentLoaded', () => {
-        document.querySelectorAll('.capture-btn').forEach(button => {
-            button.addEventListener('click', function(event) {
-                event.preventDefault();
+document.addEventListener('DOMContentLoaded', () => {
+  const captureBtn = document.getElementById('capture-btn');
 
-                fetch('/capture_snapshot/unknown')
-                    .then(response => {
-                        if (response.ok) {
-                            showToast('📸 Snapshot captured!');
-                        } else {
-                            showToast('❌ Failed to capture snapshot.', 'error');
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Fetch error:', error);
-                        showToast('❌ Error capturing snapshot.', 'error');
-                    });
-            });
-        });
-    });
+  // existing…
+  const current = "{{ mode|default('face') }}";
+  const btnFace = document.getElementById('btn-face');
+  const btnViolence = document.getElementById('btn-violence');
+  const modeLabel = document.getElementById('mode-label');
 
-    function showToast(message, type = 'success') {
-        const container = document.getElementById('toast-container');
-        if (!container) return;
+  let currentMode = current; // track mode on the client
 
-        const toast = document.createElement('div');
-        toast.className = `toast ${type}`;
-        toast.innerText = message;
-        container.appendChild(toast);
+  function setActive(mode) {
+    currentMode = mode;
+    btnFace.classList.toggle('active', mode === 'face');
+    btnViolence.classList.toggle('active', mode === 'violence');
+    modeLabel.textContent = "Current: " + mode;
+    // update button label based on mode
+    captureBtn.textContent = (mode === 'violence') ? 'Capture Violence' : 'Capture Snapshot';
+  }
+  setActive(current);
 
-        setTimeout(() => {
-            toast.classList.add('fade-out');
-            toast.addEventListener('transitionend', () => toast.remove());
-        }, 3000);
+  // click -> send right threat type depending on mode
+  captureBtn.addEventListener('click', (event) => {
+    event.preventDefault();
+    const threat = (currentMode === 'violence') ? 'fight' : 'unknown';
+    fetch('/capture_snapshot/' + threat)
+      .then(res => res.ok ? showToast('📸 Snapshot captured!') : showToast('❌ Failed to capture.', 'error'))
+      .catch(() => showToast('❌ Error capturing snapshot.', 'error'));
+  });
+
+  async function switchMode(mode) {
+    try {
+      const res = await fetch("{{ url_for('switch_mode') }}", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode })
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error("Failed to switch mode");
+      setActive(data.mode);
+
+      // refresh stream
+      const img = document.getElementById('stream');
+      img.src = img.src.split('?')[0] + '?t=' + Date.now();
+    } catch (e) {
+      showToast('❌ ' + e.message, 'error');
     }
-    </script>
-</body>
-</html>
+  }
+
+  btnFace.addEventListener('click', () => switchMode('face'));
+  btnViolence.addEventListener('click', () => switchMode('violence'));
+});
+
+// your showToast() stays the same
+</script>
+
