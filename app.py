@@ -8,13 +8,13 @@ from datetime import datetime
 import threading
 
 from Recognition import recognize_faces, get_recent_recognitions
-# NEW: import your violence-frame function (see note above)
+# Violence wrapper must export: detect_violence(frame) -> (annotated_frame, labels)
 from Violence import detect_violence
 
 app = Flask(__name__, template_folder='templates')
 app.secret_key = 'sentron-secret-key'  # Change this in production
 
-# Simulated user database
+# ================== AUTH (simple demo) ==================
 USER = {'admin': 'password123'}
 
 # ================== MODE TOGGLE ==================
@@ -34,6 +34,20 @@ def set_mode(new_mode: str) -> bool:
         _current_mode = new_mode
     return True
 
+# ================== STREAM CONTROL (single active generator) ==================
+_stream_epoch = 0
+_epoch_lock = threading.Lock()
+
+def get_epoch():
+    # atomic read is fine for ints
+    return _stream_epoch
+
+def bump_epoch():
+    global _stream_epoch
+    with _epoch_lock:
+        _stream_epoch += 1
+        return _stream_epoch
+
 # ================== THREAT LOGGING ==================
 SNAP_DIR = os.path.join("static", "snapshots")
 LOG_DIR  = "logs"
@@ -52,14 +66,20 @@ _last_threat_ts = 0.0
 
 def log_threat(threat_type: str, frame_bgr):
     """Save snapshot + append CSV row (using the already-annotated frame)."""
-    ts_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    fname = datetime.now().strftime("%Y%m%d_%H%M%S_%f") + ".jpg"
+    ts = datetime.now()
+    ts_str = ts.strftime("%Y-%m-%d %H:%M:%S")
+
+    # ⬅ include the threat in the filename so gallery can infer it
+    fname = f"threat_{threat_type.lower()}_{ts.strftime('%Y%m%d_%H%M%S_%f')}.jpg"
     save_path = os.path.join(SNAP_DIR, fname)
+
     try:
         cv2.imwrite(save_path, frame_bgr)
     except Exception as e:
         print("Snapshot save failed:", e)
         return
+
+    # keep the CSV pointing to the static path
     rel_path = os.path.join("static", "snapshots", fname)
     with open(THREAT_LOG, "a", newline="") as f:
         csv.writer(f).writerow([ts_str, threat_type, rel_path])
@@ -68,21 +88,34 @@ def log_threat(threat_type: str, frame_bgr):
 camera = cv2.VideoCapture(0)
 
 def gen_frames():
+    """Single streaming generator. It exits when the stream epoch changes (i.e., after a mode switch)."""
     global _last_threat_ts
+
+    my_epoch = get_epoch()  # snapshot when this generator started
+
     while True:
+        # If mode was switched (epoch bumped), kill this generator
+        if my_epoch != get_epoch():
+            break
+
         success, frame = camera.read()
         if not success:
-            break
+            time.sleep(0.05)
+            continue
 
         mode = get_mode()
 
         # Route to the selected pipeline
         labels = []
         if mode == "violence":
-            # Must return (annotated_frame, labels)
-            out, labels = detect_violence(frame)
+            try:
+                out, labels = detect_violence(frame)
+            except Exception as e:
+                # Don't kill the stream if the model hiccups; show raw frame instead
+                print("violence error:", e)
+                out, labels = frame, []
         else:
-            # Backward-compatible: user’s recognize_faces() may return frame or (frame, labels)
+            # Backward-compatible: recognize_faces() may return frame or (frame, labels)
             r = recognize_faces(frame)
             if isinstance(r, tuple) and len(r) == 2:
                 out, labels = r
@@ -92,8 +125,10 @@ def gen_frames():
 
         # Auto-log threats on rising events with cooldown
         # Consider "FIGHT" or "ABUSE" as threats
-        is_fight = any(isinstance(lbl, str) and (("FIGHT" in lbl.upper()) or ("ABUSE" in lbl.upper()))
-                       for lbl in (labels or []))
+        is_fight = any(
+            isinstance(lbl, str) and (("FIGHT" in lbl.upper()) or ("ABUSE" in lbl.upper()))
+            for lbl in (labels or [])
+        )
         now = time.time()
         if mode == "violence" and is_fight and (now - _last_threat_ts) >= THREAT_COOLDOWN:
             log_threat("FIGHT", out)
@@ -135,6 +170,8 @@ def switch_mode():
         return jsonify({"ok": False, "error": "unauthorized"}), 401
     new_mode = request.json.get('mode') if request.is_json else request.form.get('mode')
     ok = set_mode(new_mode)
+    if ok:
+        bump_epoch()  # kill any existing stream generator so the new mode is the only one running
     return jsonify({"ok": ok, "mode": get_mode()}), (200 if ok else 400)
 
 # ========== PROTECTED ROUTES ==========
@@ -149,6 +186,7 @@ def home():
 def video_feed():
     if 'user' not in session:
         return redirect(url_for('login'))
+    # Each call returns a brand new generator which will exit on the next epoch bump
     return Response(gen_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/threats')
@@ -174,27 +212,63 @@ def snapshots():
     if 'user' not in session:
         return redirect(url_for('login'))
 
+    base_path = os.path.join('static', 'snapshots')
     snaps = []
-    base_path = 'static/snapshots'
 
-    if os.path.isdir(base_path):
-        for filename in os.listdir(base_path):
-            if filename.endswith(".jpg"):
-                # Try to parse our saved filename patterns (YYYYmmdd_HHMMSS_micro.jpg)
-                ts = filename.replace(".jpg", "").split("_", 2)[:2]
-                try:
-                    dt = datetime.strptime("_".join(ts), "%Y%m%d_%H%M%S")
-                    date_str = dt.strftime("%d/%m/%Y")
-                    time_str = dt.strftime("%H:%M:%S")
-                except Exception:
-                    date_str, time_str = "", ""
-                snaps.append({
-                    'filepath': filename,
-                    'threat': "Fight",
-                    'date': date_str,
-                    'time': time_str
-                })
+    if not os.path.isdir(base_path):
+        return render_template('snapshots.html', snapshots=[])
 
+    import re
+
+    for root, _, files in os.walk(base_path):
+        for filename in files:
+            fn_low = filename.lower()
+            if not fn_low.endswith(('.jpg', '.jpeg', '.png')):
+                continue
+
+            abs_path = os.path.join(root, filename)
+            rel_from_snapshots = os.path.relpath(abs_path, base_path)
+
+            # ---- infer threat from filename ----
+            if 'fight' in fn_low:
+                threat = 'Fight'
+            elif 'unknown' in fn_low:
+                threat = 'Unknown user'
+            else:
+                threat = 'Snapshot'
+
+            # ---- extract date/time ----
+            date_str, time_str = "", ""
+
+            # Prefer parent folder YYYY-MM-DD if present
+            parent = os.path.basename(root)
+            if re.fullmatch(r'\d{4}-\d{2}-\d{2}', parent):
+                yyyy, mm, dd = parent.split('-')
+                date_str = f"{dd}/{mm}/{yyyy}"
+
+            # HHMMSS anywhere in filename
+            m_time = re.search(r'(?<!\d)(\d{6})(?!\d)', filename)
+            if m_time:
+                t = m_time.group(1)
+                time_str = f"{t[0:2]}:{t[2:4]}:{t[4:6]}"
+
+            # YYYYmmdd_HHMMSS if present, fill missing pieces
+            m_full = re.search(r'(\d{8})_(\d{6})', filename)
+            if m_full:
+                ymd, hhmmss = m_full.groups()
+                if not date_str:
+                    date_str = f"{ymd[6:8]}/{ymd[4:6]}/{ymd[0:4]}"
+                if not time_str:
+                    time_str = f"{hhmmss[0:2]}:{hhmmss[2:4]}:{hhmmss[4:6]}"
+
+            snaps.append({
+                'filepath': rel_from_snapshots,  # relative to static/snapshots
+                'threat': threat,
+                'date': date_str,
+                'time': time_str
+            })
+
+    snaps.sort(key=lambda s: os.path.getmtime(os.path.join(base_path, s['filepath'])), reverse=True)
     return render_template('snapshots.html', snapshots=snaps)
 
 @app.route('/capture_snapshot/<threat>')
@@ -204,15 +278,20 @@ def capture_snapshot(threat):
 
     os.makedirs(SNAP_DIR, exist_ok=True)
     success, frame = camera.read()
-    if success:
-        now = datetime.now()
-        timestamp = now.strftime('%Y%m%d_%H%M%S')
-        filename = f"threat_{threat}_{timestamp}.jpg"
-        filepath = os.path.join(SNAP_DIR, filename)
-        cv2.imwrite(filepath, frame)
-        return f"Snapshot saved: {filename}", 200
-    else:
+    if not success:
         return "Failed to capture frame", 500
+
+    # ⬅ server-authoritative: use current mode, not the URL param
+    mode = get_mode()
+    threat_type = 'fight' if mode == 'violence' else 'unknown'
+
+    now = datetime.now()
+    timestamp = now.strftime('%Y%m%d_%H%M%S')
+    filename = f"threat_{threat_type}_{timestamp}.jpg"
+    filepath = os.path.join(SNAP_DIR, filename)
+    cv2.imwrite(filepath, frame)
+    return f"Snapshot saved: {filename}", 200
+
 
 # ========== RECENT RECOGNITIONS ==========
 @app.route('/recent')
@@ -235,6 +314,7 @@ def test():
 
 if __name__ == "__main__":
     try:
+        # Avoid duplicated workers in debug on Windows
         app.run(debug=True, use_reloader=False, host="0.0.0.0", port=5000)
     finally:
         # Clean up camera on exit

@@ -1,69 +1,40 @@
-# violence.py  (refactor of 05_infer_unified_multiclass_fast_v8_cpu.py)
-# Adds a single-frame wrapper: detect_violence(frame) -> (annotated_frame, ["FIGHT"]|["NORMAL"])
+# Violence.py  -- Flask-friendly wrapper exposing: detect_violence(frame) -> (annotated_frame, ["FIGHT"]|["NORMAL"])
+# Refactor of your 05_infer_unified_multiclass_fast_v8_cpu.py without changing detection logic/thresholds.
 
-import time, collections
+import time, collections, os
 from pathlib import Path
+from datetime import datetime, timedelta
 import cv2
 import numpy as np
 import tensorflow as tf
 from ultralytics import YOLO
-
-# ---------- NEW: email imports ----------
-import os
-from datetime import datetime, timedelta
 import smtplib
 from email.message import EmailMessage
-# ---------------------------------------
 
-# ---------- Config ----------
-OUT = Path("C:\\Users\\Kailasnath Pillai\\Desktop\\Sentron-2")
-OUT.mkdir(parents=True, exist_ok=True)
+# ---------------------- Paths & model files ----------------------
+ROOT = Path(__file__).resolve().parent
 
-FRAME_INTERVAL_SEC = 0.10
-DET_CONF_THR = 0.60      # person bbox conf (pose model)
-IOU_TRACK_THR = 0.30
-SEQ_LEN = 5
-JOINT_CONF_THR = 0.40
-L_SH, R_SH, L_HIP, R_HIP = 5, 6, 11, 12
+# Where to save fight snapshots (Windows path you requested)
+SNAP_DIR = Path(r"C:\Users\Kailasnath Pillai\Desktop\Sentron-2\static\violence")
+SNAP_DIR.mkdir(parents=True, exist_ok=True)
 
-# Runtime flags (window/video writer are disabled in wrapper)
-SHOW_WINDOW = False
-SAVE_OUTPUT = False
-SMOOTH_WIN   = 10
-DECISION_THR = 0.50
+# Keras classifier path (adjust if yours lives elsewhere)
+MODEL_PATH = ROOT / "model_bilstm.keras"
 
-# ---------- CPU speed knobs (YOLOv8) ----------
-DEVICE = "cpu"           # stay on CPU
+# YOLO weights (Ultralytics will auto-download if not found)
 POSE_WEIGHTS    = "yolov8n-pose.pt"   # tiny pose
-POSE_IMGSZ      = 288                 # smaller = faster
 WEAPON_WEIGHTS  = "yolov8n.pt"        # tiny detector (COCO has "knife")
-WEAPON_IMGSZ    = 224
 
-WEAPON_CONF_THR = 0.28
-WEAPON_LABELS   = {"knife","gun","pistol","revolver","rifle","firearm"}
-
-REQUIRE_OVERLAP_WITH_PERSON = False   # set True if you only want weapons near people
-WEAPON_EVERY_N = 5                    # run weapon det every N frames
-CROP_WEAPON_TO_PERSON = True          # detect weapons on person crops (cheaper)
-MAX_PERSONS = 6                       # limit max tracks/boxes per frame
-
-MODEL_PATH = OUT / "model_bilstm.keras"
-
-# ---------- NEW: email config (mirrors recognition.py) ----------
-EMAIL_SENDER = 'sentron2025@gmail.com'
-EMAIL_PASSWORD = 'vjisvmpflcgxipft'  # Gmail app password (same as recognition.py)
+# ---------------------- Email config (same style as recognition.py) ----------------------
+EMAIL_SENDER    = 'sentron2025@gmail.com'
+EMAIL_PASSWORD  = 'vjisvmpflcgxipft'   # Gmail app password
 EMAIL_RECEIVERS = ['kilopar336699@gmail.com', 'safwann.mohiuddin@gmail.com']
-LIVE_FEED_LINK = 'http://127.0.0.1:5000/video_feed'  # adjust if needed
-EMAIL_COOLDOWN = timedelta(minutes=5)
-
-# Ensure snapshots directory exists
-(OUT / "static" / "snapshots").mkdir(parents=True, exist_ok=True)
-
-# Cooldown tracker
+LIVE_FEED_LINK  = 'http://127.0.0.1:5000/video_feed'
+EMAIL_COOLDOWN  = timedelta(minutes=5)
 _last_email_time_violence = None
 
-def send_alert_email(image_path: str):
-    """Send a violence/fight email alert with attached snapshot (PNG/JPG)."""
+def _send_fight_email(image_path: str):
+    """Send a fight alert email with attached PNG/JPG snapshot (cooldown-protected)."""
     global _last_email_time_violence
     now = datetime.now()
     if _last_email_time_violence and (now - _last_email_time_violence) < EMAIL_COOLDOWN:
@@ -81,31 +52,53 @@ def send_alert_email(image_path: str):
         f"Time: {now.strftime('%Y-%m-%d %H:%M:%S')}"
     )
 
-    # Guess subtype from extension (fallback to png)
     ext = os.path.splitext(image_path)[1].lower()
     subtype = 'png' if ext in ('.png', '') else ext.lstrip('.')
+    with open(image_path, 'rb') as img:
+        msg.add_attachment(img.read(), maintype='image', subtype=subtype,
+                           filename=os.path.basename(image_path))
 
     try:
-        with open(image_path, 'rb') as img:
-            msg.add_attachment(img.read(), maintype='image', subtype=subtype,
-                               filename=os.path.basename(image_path))
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=20) as smtp:
             smtp.login(EMAIL_SENDER, EMAIL_PASSWORD)
             smtp.sendmail(EMAIL_SENDER, EMAIL_RECEIVERS, msg.as_string())
-        print(f"Violence email alert sent for {image_path}")
+        print(f"Fight email sent: {image_path}")
         _last_email_time_violence = now
     except Exception as e:
-        print(f"Failed to send violence email: {e}")
-# ---------------------------------------------------------------
+        print(f"Failed to send fight email: {e}")
 
-# ================= Module-wide state (loaded once) =================
+# ---------------------- Detection config (unchanged logic/thresholds) ----------------------
+FRAME_INTERVAL_SEC = 0.10
+DET_CONF_THR = 0.60
+IOU_TRACK_THR = 0.30
+SEQ_LEN = 5
+JOINT_CONF_THR = 0.40
+L_SH, R_SH, L_HIP, R_HIP = 5, 6, 11, 12
+
+SHOW_WINDOW = False
+SAVE_OUTPUT = False
+SMOOTH_WIN   = 10
+DECISION_THR = 0.50
+
+DEVICE = "cpu"
+POSE_IMGSZ      = 288
+WEAPON_IMGSZ    = 224
+
+WEAPON_CONF_THR = 0.28
+WEAPON_LABELS   = {"knife","gun","pistol","revolver","rifle","firearm"}
+
+REQUIRE_OVERLAP_WITH_PERSON = False
+WEAPON_EVERY_N = 5
+CROP_WEAPON_TO_PERSON = True
+MAX_PERSONS = 6
+
+# ---------------------- Module state (load once; keep buffers across frames) ----------------------
 _initialized = False
 pose = None
 weapon_det = None
 clf = None
 names_map = {}
 
-# Stateful buffers across frames (so LSTM sees sequences)
 tracks = {}
 buffers = collections.defaultdict(lambda: collections.deque(maxlen=SEQ_LEN))
 probs_hist = collections.defaultdict(lambda: collections.deque(maxlen=SMOOTH_WIN))
@@ -114,7 +107,7 @@ abuse_down = 0
 abuse_active = False
 frame_idx = 0
 
-# ---------- Helpers from your script ----------
+# ---------------------- Helpers (unchanged) ----------------------
 def iou(a,b):
     x1=max(a[0],b[0]); y1=max(a[1],b[1]); x2=min(a[2],b[2]); y2=min(a[3],b[3])
     inter=max(0,x2-x1)*max(0,y2-y1)
@@ -144,7 +137,7 @@ def norm_kpts_by_box(kxy, box):
     cx=(x1+x2)/2.0; cy=(y1+y2)/2.0
     k=kxy.astype(np.float32).copy()
     k[:,0]=(k[:,0]-cx)/w; k[:,1]=(k[:,1]-cy)/h
-    return k  # (17,2)
+    return k
 
 def angle_3pts(a,b,c):
     bax=a[0]-b[0]; bay=a[1]-b[1]
@@ -165,13 +158,13 @@ def ang_feats(k):
     return np.array([a0,a1,a2,a3,a4,a5],dtype=np.float32)
 
 def build_feats_from_buffers(k_seq):
-    Kseq=np.stack(k_seq)                       # (T,17,2)
-    P=Kseq.reshape(len(k_seq), -1)             # (T,34)
+    Kseq=np.stack(k_seq)
+    P=Kseq.reshape(len(k_seq), -1)
     Vpos=np.zeros_like(P); Vpos[1]=0
     Vpos[1:] = P[1:] - P[:-1]
-    A=np.stack([ang_feats(Kseq[t]) for t in range(len(k_seq))])  # (T,6)
+    A=np.stack([ang_feats(Kseq[t]) for t in range(len(k_seq))])
     Vang=np.zeros_like(A); Vang[1:] = A[1:] - A[:-1]
-    F=np.concatenate([P,Vpos,A,Vang],axis=1).astype(np.float32)  # (T,80)
+    F=np.concatenate([P,Vpos,A,Vang],axis=1).astype(np.float32)
     return F
 
 def get_names_map(ultra_model):
@@ -198,26 +191,27 @@ def expand_and_clip(box, w, h, scale=1.2):
     cx=(x1+x2)/2.0; cy=(y1+y2)/2.0
     bw=(x2-x1)*scale; bh=(y2-y1)*scale
     nx1=max(0,int(cx-bw/2)); ny1=max(0,int(cy-bh/2))
-    nx2=min(w,int(cx+bw/2)); ny2=min(h,intcy+bh/2))
+    nx2=min(w,int(cx+bw/2)); ny2=min(h,int(cy+bh/2))
     return nx1,ny1,nx2,ny2
 
-# ================= Init/load once =================
+# ---------------------- Init/load once ----------------------
 def _init_models():
     global _initialized, pose, weapon_det, clf, names_map
     if _initialized:
         return
+    if not MODEL_PATH.exists():
+        raise FileNotFoundError(f"Keras model not found at {MODEL_PATH}. Update MODEL_PATH.")
     pose = YOLO(POSE_WEIGHTS)
     weapon_det = YOLO(WEAPON_WEIGHTS)
     clf  = tf.keras.models.load_model(MODEL_PATH)
     names_map = get_names_map(weapon_det)
     _initialized = True
 
-# ===================== Wrapper =====================
+# ---------------------- Per-frame wrapper for Flask ----------------------
 def detect_violence(frame):
     """
-    Single-frame inference for Flask.
-    Input:  frame (BGR, np.ndarray)
-    Output: annotated_frame (BGR), labels (["FIGHT"]|["NORMAL"] or ["ABUSE"])
+    Input:  BGR frame (np.ndarray)
+    Output: (annotated_frame, labels) where labels is ["FIGHT"] or ["NORMAL"]
     """
     _init_models()
     global tracks, buffers, probs_hist, abuse_up, abuse_down, abuse_active, frame_idx
@@ -263,6 +257,7 @@ def detect_violence(frame):
                             x1,y1,x2,y2 = xyxy
                             ox1,oy1,_,_ = meta
                             weapon_hits.append((name, confv, np.array([x1+ox1,y1+oy1,x2+ox1,y2+oy1])))
+                        # break after first crop with a hit (matches your pattern)
                         break
         else:
             wr = weapon_det(frame, imgsz=WEAPON_IMGSZ, device=DEVICE, verbose=False,
@@ -329,72 +324,17 @@ def detect_violence(frame):
         cv2.putText(overlay, "ABUSE", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0,0,255), 3, cv2.LINE_AA)
 
     annotated = cv2.addWeighted(overlay, 0.95, frame, 0.05, 0)
-
     frame_idx += 1
 
-    # ---------- NEW: email on fight (save annotated snapshot, then email) ----------
+    # --- On fight: save annotated screenshot + email (does not change detection logic) ---
     if abuse_active or any_fight:
         try:
-            now = datetime.now()
-            date_folder = now.strftime('%Y-%m-%d')
-            folder_path = OUT / "static" / "snapshots" / date_folder
-            folder_path.mkdir(parents=True, exist_ok=True)
-            filename = f"threat_Fight_{now.strftime('%H%M%S')}.png"
-            filepath = folder_path / filename
-            cv2.imwrite(str(filepath), annotated)
-            send_alert_email(str(filepath))
+            fname = f"threat_Fight_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            snap_path = SNAP_DIR / fname
+            cv2.imwrite(str(snap_path), annotated)
+            _send_fight_email(str(snap_path))
         except Exception as e:
             print("Failed to save/email fight snapshot:", e)
         return annotated, ["FIGHT"]
-    # ------------------------------------------------------------------------------
 
-    else:
-        return annotated, ["NORMAL"]
-
-# ===================== Standalone mode =====================
-# You can still run: python violence.py
-def _open_source(SOURCE):
-    # Keep your robust open logic
-    for api in (cv2.CAP_V4L2, cv2.CAP_ANY):
-        cap = cv2.VideoCapture(SOURCE, api)
-        if cap.isOpened():
-            return cap, True
-    raise SystemExit(f"❌ Could not open webcam index {SOURCE}.")
-
-def main():
-    _init_models()
-    SOURCE = 0  # webcam
-    cap, _ = _open_source(SOURCE)
-    last_t = 0.0
-    writer = None
-
-    try:
-        while True:
-            ok, frame = cap.read()
-            if not ok:
-                break
-
-            now = time.time()
-            if (now - last_t) < FRAME_INTERVAL_SEC:
-                continue
-            last_t = now
-
-            annotated, labels = detect_violence(frame)
-
-            if SHOW_WINDOW:
-                cv2.imshow("Violence Detection", annotated)
-                if cv2.waitKey(1) & 0xFF == ord('q'): break
-
-            if SAVE_OUTPUT:
-                if writer is None:
-                    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-                    writer = cv2.VideoWriter(str(OUT/"standalone_out.mp4"), fourcc, 25.0, (annotated.shape[1], annotated.shape[0]))
-                writer.write(annotated)
-    finally:
-        cap.release()
-        if writer is not None:
-            writer.release()
-        cv2.destroyAllWindows()
-
-if __name__ == "__main__":
-    main()
+    return annotated, ["NORMAL"]
