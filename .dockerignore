@@ -1,8 +1,19 @@
-# .dockerignore
-venv/
-__pycache__/
-*.pyc
-.git/
-.gitignore
-logs/
-.wheels/
+cat <<'EOF' > .dockerignore
+.git
+**/__pycache__/
+venv
+*.log
+*.csv
+*.npy
+*.pt
+*.h5
+*.mp4
+*.avi
+data/
+datasets/
+outputs/
+notebooks/
+tests/
+docs/
+static/raw_media/
+EOF
