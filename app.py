@@ -1,18 +1,24 @@
 import os
-print("Current working directory:", os.getcwd())
-
-from flask import Flask, render_template, request, redirect, url_for, session, Response, send_file, jsonify
-import cv2
-import csv, time
+import csv
+import time
 from datetime import datetime
 import threading
 
+from flask import (
+    Flask, render_template, request, redirect, url_for,
+    session, Response, send_file, jsonify
+)
+import cv2
+
+# ---- Your pipelines ----
 from Recognition import recognize_faces, get_recent_recognitions
 # Violence wrapper must export: detect_violence(frame) -> (annotated_frame, labels)
 from Violence import detect_violence
 
-app = Flask(__name__, template_folder='templates')
-app.secret_key = 'sentron-secret-key'  # Change this in production
+print("Current working directory:", os.getcwd())
+
+app = Flask(__name__, template_folder='templates', static_folder='static')
+app.secret_key = 'sentron-secret-key'  # Change in production
 
 # ================== AUTH (simple demo) ==================
 USER = {'admin': 'password123'}
@@ -22,15 +28,18 @@ MODES = ("face", "violence")
 _current_mode = "face"
 _mode_lock = threading.Lock()
 
-def get_mode():
+def get_mode() -> str:
     with _mode_lock:
         return _current_mode
 
 def set_mode(new_mode: str) -> bool:
+    """Set mode with logging; return True on success."""
     global _current_mode
     if new_mode not in MODES:
         return False
     with _mode_lock:
+        if _current_mode != new_mode:
+            print(f"[MODE] {datetime.now():%Y-%m-%d %H:%M:%S} -> {new_mode}")
         _current_mode = new_mode
     return True
 
@@ -38,14 +47,15 @@ def set_mode(new_mode: str) -> bool:
 _stream_epoch = 0
 _epoch_lock = threading.Lock()
 
-def get_epoch():
-    # atomic read is fine for ints
-    return _stream_epoch
+def get_epoch() -> int:
+    return _stream_epoch  # atomic enough for reads
 
-def bump_epoch():
+def bump_epoch() -> int:
+    """Increment epoch so existing generators exit; return the new epoch."""
     global _stream_epoch
     with _epoch_lock:
         _stream_epoch += 1
+        print(f"[STREAM] epoch bumped -> #{_stream_epoch}")
         return _stream_epoch
 
 # ================== THREAT LOGGING ==================
@@ -58,8 +68,7 @@ os.makedirs(LOG_DIR, exist_ok=True)
 # Initialize CSV if missing
 if not os.path.exists(THREAT_LOG):
     with open(THREAT_LOG, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["time", "type", "image"])  # headers
+        csv.writer(f).writerow(["time", "type", "image"])
 
 THREAT_COOLDOWN = 5  # seconds
 _last_threat_ts = 0.0
@@ -69,33 +78,31 @@ def log_threat(threat_type: str, frame_bgr):
     ts = datetime.now()
     ts_str = ts.strftime("%Y-%m-%d %H:%M:%S")
 
-    # ⬅ include the threat in the filename so gallery can infer it
     fname = f"threat_{threat_type.lower()}_{ts.strftime('%Y%m%d_%H%M%S_%f')}.jpg"
     save_path = os.path.join(SNAP_DIR, fname)
 
     try:
         cv2.imwrite(save_path, frame_bgr)
     except Exception as e:
-        print("Snapshot save failed:", e)
+        print("[SNAP] save failed:", e)
         return
 
-    # keep the CSV pointing to the static path
     rel_path = os.path.join("static", "snapshots", fname)
     with open(THREAT_LOG, "a", newline="") as f:
         csv.writer(f).writerow([ts_str, threat_type, rel_path])
 
 # ========== VIDEO FEED ==========
-camera = cv2.VideoCapture(0)
+camera = cv2.VideoCapture(0, cv2.CAP_DSHOW)  # CAP_DSHOW helps on Windows USB cams
 
 def gen_frames():
-    """Single streaming generator. It exits when the stream epoch changes (i.e., after a mode switch)."""
+    """Single streaming generator. It exits when the stream epoch changes."""
     global _last_threat_ts
-
     my_epoch = get_epoch()  # snapshot when this generator started
 
     while True:
         # If mode was switched (epoch bumped), kill this generator
         if my_epoch != get_epoch():
+            print("[STREAM] generator exiting (epoch changed)")
             break
 
         success, frame = camera.read()
@@ -111,8 +118,7 @@ def gen_frames():
             try:
                 out, labels = detect_violence(frame)
             except Exception as e:
-                # Don't kill the stream if the model hiccups; show raw frame instead
-                print("violence error:", e)
+                print("[VIOLENCE] error:", e)
                 out, labels = frame, []
         else:
             # Backward-compatible: recognize_faces() may return frame or (frame, labels)
@@ -125,18 +131,18 @@ def gen_frames():
 
         # Auto-log threats on rising events with cooldown
         # Consider "FIGHT" or "ABUSE" as threats
-        is_fight = any(
+        is_threat = any(
             isinstance(lbl, str) and (("FIGHT" in lbl.upper()) or ("ABUSE" in lbl.upper()))
             for lbl in (labels or [])
         )
         now = time.time()
-        if mode == "violence" and is_fight and (now - _last_threat_ts) >= THREAT_COOLDOWN:
+        if mode == "violence" and is_threat and (now - _last_threat_ts) >= THREAT_COOLDOWN:
             log_threat("FIGHT", out)
             _last_threat_ts = now
 
         # Encode frame and stream
-        ret, buffer = cv2.imencode('.jpg', out)
-        if not ret:
+        ok, buffer = cv2.imencode('.jpg', out)
+        if not ok:
             continue
         jpg = buffer.tobytes()
         yield (b'--frame\r\n'
@@ -168,11 +174,14 @@ def logout():
 def switch_mode():
     if 'user' not in session:
         return jsonify({"ok": False, "error": "unauthorized"}), 401
+
     new_mode = request.json.get('mode') if request.is_json else request.form.get('mode')
+
     ok = set_mode(new_mode)
     if ok:
-        bump_epoch()  # kill any existing stream generator so the new mode is the only one running
-    return jsonify({"ok": ok, "mode": get_mode()}), (200 if ok else 400)
+        new_epoch = bump_epoch()  # kill any existing stream generator so only new one runs
+        return jsonify({"ok": True, "mode": get_mode(), "epoch": new_epoch}), 200
+    return jsonify({"ok": False, "mode": get_mode()}), 400
 
 # ========== PROTECTED ROUTES ==========
 @app.route('/home')
@@ -187,7 +196,11 @@ def video_feed():
     if 'user' not in session:
         return redirect(url_for('login'))
     # Each call returns a brand new generator which will exit on the next epoch bump
-    return Response(gen_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    resp = Response(gen_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    # Prevent caching of the multipart stream
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    return resp
 
 @app.route('/threats')
 def threats():
@@ -240,19 +253,16 @@ def snapshots():
             # ---- extract date/time ----
             date_str, time_str = "", ""
 
-            # Prefer parent folder YYYY-MM-DD if present
             parent = os.path.basename(root)
             if re.fullmatch(r'\d{4}-\d{2}-\d{2}', parent):
                 yyyy, mm, dd = parent.split('-')
                 date_str = f"{dd}/{mm}/{yyyy}"
 
-            # HHMMSS anywhere in filename
             m_time = re.search(r'(?<!\d)(\d{6})(?!\d)', filename)
             if m_time:
                 t = m_time.group(1)
                 time_str = f"{t[0:2]}:{t[2:4]}:{t[4:6]}"
 
-            # YYYYmmdd_HHMMSS if present, fill missing pieces
             m_full = re.search(r'(\d{8})_(\d{6})', filename)
             if m_full:
                 ymd, hhmmss = m_full.groups()
@@ -281,17 +291,15 @@ def capture_snapshot(threat):
     if not success:
         return "Failed to capture frame", 500
 
-    # ⬅ server-authoritative: use current mode, not the URL param
+    # Server-authoritative: use current mode, not the URL param
     mode = get_mode()
     threat_type = 'fight' if mode == 'violence' else 'unknown'
 
     now = datetime.now()
-    timestamp = now.strftime('%Y%m%d_%H%M%S')
-    filename = f"threat_{threat_type}_{timestamp}.jpg"
+    filename = f"threat_{threat_type}_{now:%Y%m%d_%H%M%S}.jpg"
     filepath = os.path.join(SNAP_DIR, filename)
     cv2.imwrite(filepath, frame)
     return f"Snapshot saved: {filename}", 200
-
 
 # ========== RECENT RECOGNITIONS ==========
 @app.route('/recent')
@@ -312,12 +320,18 @@ def download_csv():
 def test():
     return render_template('index.html')
 
+# ========== MAIN ==========
 if __name__ == "__main__":
     try:
         # Avoid duplicated workers in debug on Windows
         app.run(debug=True, use_reloader=False, host="0.0.0.0", port=5000)
     finally:
-        # Clean up camera on exit
-        if camera is not None:
-            camera.release()
-        cv2.destroyAllWindows()
+        try:
+            if 'camera' in globals() and camera is not None:
+                camera.release()
+        except Exception:
+            pass
+        try:
+            cv2.destroyAllWindows()
+        except Exception:
+            pass

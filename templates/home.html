@@ -6,8 +6,19 @@
     <style>
       /* minimal visual hint for active toggle */
       .toggle-wrap{display:flex;gap:12px;align-items:center;justify-content:center;margin-top:12px}
-      .pill{padding:6px 12px;border:1px solid #ccc;border-radius:999px;cursor:pointer;background:#fff}
-      .pill.active{background:#222;color:#fff;border-color:#222}
+      .pill{
+        padding:6px 12px;
+        border:1px solid #ccc;
+        border-radius:999px;
+        cursor:pointer;
+        background: transparent;                 /* not white */
+        transition: box-shadow .15s ease, border-color .15s ease, color .15s ease;
+      }
+      .pill.active{
+        border-color:#222;
+        box-shadow: 0 0 0 3px rgba(0,0,0,0.12) inset; /* subtle highlight */
+        color:#000;
+      }
     </style>
 </head>
 <body>
@@ -17,8 +28,8 @@
         <!-- MODE TOGGLE -->
         <div class="toggle-wrap">
           <span>Mode:</span>
-          <button class="pill" id="btn-face">Recognition</button>
-          <button class="pill" id="btn-violence">Violence</button>
+          <button class="pill" id="btn-face" aria-pressed="false">Recognition</button>
+          <button class="pill" id="btn-violence" aria-pressed="false">Violence</button>
           <span id="mode-label" style="margin-left:8px;opacity:0.7;">Current: {{ mode|default('face') }}</span>
         </div>
 
@@ -26,7 +37,7 @@
         <img id="stream" src="{{ url_for('video_feed') }}" class="video-feed mt-3 mb-3" alt="Live Video Feed">
 
         <!-- Manual snapshot capture button -->
-        <button class="btn capture-btn">Capture Snapshot</button>
+        <button class="btn capture-btn" id="capture-btn">Capture Snapshot</button>
 
         <div class="d-flex justify-content-center mt-4 gap-3">
             <div class="button-box">
@@ -57,31 +68,31 @@
 
     <script>
 document.addEventListener('DOMContentLoaded', () => {
-  const captureBtn = document.getElementById('capture-btn');
+  const captureBtn   = document.getElementById('capture-btn');
+  const btnFace      = document.getElementById('btn-face');
+  const btnViolence  = document.getElementById('btn-violence');
+  const modeLabel    = document.getElementById('mode-label');
+  const streamImg    = document.getElementById('stream');
 
-  // existing…
-  const current = "{{ mode|default('face') }}";
-  const btnFace = document.getElementById('btn-face');
-  const btnViolence = document.getElementById('btn-violence');
-  const modeLabel = document.getElementById('mode-label');
-
-  let currentMode = current; // track mode on the client
+  // initial mode from server
+  let currentMode = "{{ mode|default('face') }}";
 
   function setActive(mode) {
     currentMode = mode;
-    btnFace.classList.toggle('active', mode === 'face');
-    btnViolence.classList.toggle('active', mode === 'violence');
-    modeLabel.textContent = "Current: " + mode;
-    // update button label based on mode
-    captureBtn.textContent = (mode === 'violence') ? 'Capture Violence' : 'Capture Snapshot';
+    const isFace = mode === 'face';
+    btnFace.classList.toggle('active',     isFace);
+    btnViolence.classList.toggle('active', !isFace);
+    btnFace.setAttribute('aria-pressed',     String(isFace));
+    btnViolence.setAttribute('aria-pressed', String(!isFace));
+    if (modeLabel) modeLabel.textContent = "Current: " + mode;
+    if (captureBtn) captureBtn.textContent = (mode === 'violence') ? 'Capture Violence' : 'Capture Snapshot';
   }
-  setActive(current);
+  setActive(currentMode);
 
-  // click -> send right threat type depending on mode
+  // Snapshot: server infers threat from current mode; URL param is ignored server-side
   captureBtn.addEventListener('click', (event) => {
     event.preventDefault();
-    const threat = (currentMode === 'violence') ? 'fight' : 'unknown';
-    fetch('/capture_snapshot/' + threat)
+    fetch('/capture_snapshot/dummy')
       .then(res => res.ok ? showToast('📸 Snapshot captured!') : showToast('❌ Failed to capture.', 'error'))
       .catch(() => showToast('❌ Error capturing snapshot.', 'error'));
   });
@@ -95,11 +106,12 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       const data = await res.json();
       if (!data.ok) throw new Error("Failed to switch mode");
+
       setActive(data.mode);
 
-      // refresh stream
-      const img = document.getElementById('stream');
-      img.src = img.src.split('?')[0] + '?t=' + Date.now();
+      // Use server epoch to force a brand-new stream connection (avoids cached/stale streams)
+      const epoch = (typeof data.epoch !== 'undefined') ? data.epoch : Date.now();
+      streamImg.src = "{{ url_for('video_feed') }}" + "?epoch=" + encodeURIComponent(epoch);
     } catch (e) {
       showToast('❌ ' + e.message, 'error');
     }
@@ -110,4 +122,6 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // your showToast() stays the same
-</script>
+    </script>
+</body>
+</html>
