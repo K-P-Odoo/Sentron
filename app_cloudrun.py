@@ -20,22 +20,30 @@ from google.cloud import storage
 from Recognition import recognize_faces, get_recent_recognitions
 from Violence    import detect_violence
 
+# ================== FIXED DEFAULTS FOR YOUR DEPLOY ==================
+# You can still override via env vars in Cloud Run if you like.
+DEFAULT_APP_SECRET   = "sentron-secret-key"  # change in prod if you wish
+DEFAULT_ADMIN_PASS   = "password123"         # change in prod if you wish
+DEFAULT_GCS_BUCKET   = "sentron-demo-data"
+DEFAULT_GCS_PREFIX   = "sentron"             # becomes sentron/ in the bucket
+DEFAULT_INGEST_TOKEN = "b8c6b3f5d3f94a4a9ccfbb0a0b3f8a3d4b7f2a1c9e6d4f3ab1c2d3e4f5a6b7c8"
+
 # ================== FLASK ==================
 app = Flask(__name__, template_folder='templates', static_folder='static')
-app.secret_key = os.getenv('APP_SECRET', 'sentron-secret-key')  # set securely in prod
+app.secret_key = os.getenv('APP_SECRET', DEFAULT_APP_SECRET)
 
 # ================== SIMPLE AUTH (UI) ==================
-USER = {'admin': os.getenv('ADMIN_PASSWORD', 'password123')}
+USER = {'admin': os.getenv('ADMIN_PASSWORD', DEFAULT_ADMIN_PASS)}
 
 # ================== INGEST AUTH (Pi -> Cloud) ==================
-INGEST_TOKEN = os.getenv("INGEST_TOKEN", "")  # set on Cloud Run
+INGEST_TOKEN = os.getenv("INGEST_TOKEN", DEFAULT_INGEST_TOKEN)
 def _auth_ingest(req) -> bool:
     auth = req.headers.get("Authorization", "")
     return bool(INGEST_TOKEN) and auth == f"Bearer {INGEST_TOKEN}"
 
 # ================== GCS CONFIG ==================
-GCS_BUCKET = os.environ["GCS_BUCKET"]  # required
-GCS_PREFIX = os.getenv("GCS_PREFIX", "").strip()  # e.g., "sentron"
+GCS_BUCKET = os.getenv("GCS_BUCKET", DEFAULT_GCS_BUCKET)  # now has a concrete default
+GCS_PREFIX = os.getenv("GCS_PREFIX", DEFAULT_GCS_PREFIX).strip()
 if GCS_PREFIX and not GCS_PREFIX.endswith("/"):
     GCS_PREFIX += "/"
 
@@ -51,7 +59,6 @@ def upload_image_to_gcs(img_bgr: np.ndarray, path: str, jpeg_quality: int = 70) 
     if not ok:
         raise RuntimeError("JPEG encode failed")
     blob = bucket.blob(path)
-    # Public caching; if your bucket is private, either remove this or switch to signed URLs.
     blob.cache_control = "public, max-age=31536000"
     blob.upload_from_string(buf.tobytes(), content_type="image/jpeg")
     return f"https://storage.googleapis.com/{GCS_BUCKET}/{path}"
@@ -233,7 +240,6 @@ def video_feed():
     if "user" not in session:
         return redirect(url_for("login"))
     resp = Response(gen_frames(), mimetype="multipart/x-mixed-replace; boundary=frame")
-    # prevent caching of multipart stream
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     resp.headers["Pragma"] = "no-cache"
     return resp
