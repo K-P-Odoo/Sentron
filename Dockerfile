@@ -28,4 +28,4 @@ COPY . .
 
 ENV PORT=8080
 # IMPORTANT: start the Cloud Run entrypoint (your Cloud version), not app.py
-CMD exec gunicorn --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 0 app_cloudrun:app
+CMD exec gunicorn --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 0 wsgi:app

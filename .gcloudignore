@@ -1,0 +1,13 @@
+# .gcloudignore
+.git/
+**/.DS_Store
+**/__pycache__/
+**/*.pyc
+venv/
+.venv/
+env/
+
+# DO NOT ignore app assets
+!templates/**
+!static/**
+!models/**
