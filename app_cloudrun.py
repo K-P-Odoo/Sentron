@@ -18,10 +18,22 @@ from google.cloud import storage
 # - face: either frame OR (frame, labels)
 # - violence: (annotated_frame, labels)
 from Recognition import recognize_faces, get_recent_recognitions
-from Violence    import detect_violence
+
+# ---- GRACEFUL violence import (prevents boot crash if TF/model missing) ----
+try:
+    from Violence import detect_violence as _dv
+    VIOLENCE_AVAILABLE = True
+except Exception as e:
+    print("[BOOT] Violence model disabled:", e)
+    VIOLENCE_AVAILABLE = False
+
+    def _dv(frame):
+        # passthrough + visible label so UI still works
+        return frame, ["VIOLENCE_MODEL_UNAVAILABLE"]
+
+detect_violence = _dv
 
 # ================== FIXED DEFAULTS FOR YOUR DEPLOY ==================
-# You can still override via env vars in Cloud Run if you like.
 DEFAULT_APP_SECRET   = "sentron-secret-key"  # change in prod if you wish
 DEFAULT_ADMIN_PASS   = "password123"         # change in prod if you wish
 DEFAULT_GCS_BUCKET   = "sentron-demo-data"
@@ -42,7 +54,7 @@ def _auth_ingest(req) -> bool:
     return bool(INGEST_TOKEN) and auth == f"Bearer {INGEST_TOKEN}"
 
 # ================== GCS CONFIG ==================
-GCS_BUCKET = os.getenv("GCS_BUCKET", DEFAULT_GCS_BUCKET)  # now has a concrete default
+GCS_BUCKET = os.getenv("GCS_BUCKET", DEFAULT_GCS_BUCKET)
 GCS_PREFIX = os.getenv("GCS_PREFIX", DEFAULT_GCS_PREFIX).strip()
 if GCS_PREFIX and not GCS_PREFIX.endswith("/"):
     GCS_PREFIX += "/"
@@ -242,6 +254,7 @@ def video_feed():
     resp = Response(gen_frames(), mimetype="multipart/x-mixed-replace; boundary=frame")
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     resp.headers["Pragma"] = "no-cache"
+    resp.headers["X-Accel-Buffering"] = "no"  # hint proxies to not buffer MJPEG
     return resp
 
 @app.get("/threats")
@@ -310,6 +323,12 @@ def recent():
         return redirect(url_for("login"))
     return render_template("recent.html", recognitions=get_recent_recognitions())
 
+# ---- simple health endpoint (for fast startup checks) ----
+@app.get("/healthz")
+def healthz():
+    return "ok", 200
+
 # ================== MAIN (dev only; Cloud Run uses gunicorn) ==================
 if __name__ == "__main__":
     app.run(debug=True, use_reloader=False, host="0.0.0.0", port=int(os.getenv("PORT","8080")))
+    
