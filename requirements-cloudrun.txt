@@ -15,6 +15,7 @@ face_recognition_models==0.3.0
 scikit-learn==1.6.1
 tensorflow-cpu==2.15.1
 protobuf<4.25
+ultralytics==8.3.50
 
 # ---- Web stack ----
 Flask==3.1.1
